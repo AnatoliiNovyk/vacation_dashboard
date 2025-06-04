@@ -12,7 +12,7 @@ from datetime import datetime
 
 server = Flask(__name__)
 # Use a secure secret key, e.g., from environment variable or generated
-server.secret_key = os.urandom(24) # Generate a random secret key
+server.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24)) # Використовуйте змінну середовища або згенерований ключ як запасний варіант
 
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
