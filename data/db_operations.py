@@ -416,9 +416,8 @@ def get_vacation_history_for_employee(employee_id):
 
 def batch_import_employees(employees_data):
     """
-    Пакетный импорт или обновление сотрудников.
-    employees_data - это список словарей, где каждый словарь представляет сотрудника.
-    Ожидаемые ключи: 'fio', 'ipn', 'position', 'total_vacation_days', 'manager_fio'.
+    Пакетный импорт или обновление сотрудников. Усовершенствованная версия,
+    которая корректно обрабатывает менеджеров, определенных в том же файле.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -426,35 +425,45 @@ def batch_import_employees(employees_data):
     updated_count = 0
     errors = []
 
-    all_managers = {row['fio'] for row in get_all_employees()}
+    # Шаг 1: Собрать всех известных менеджеров (из БД и из текущего файла)
+    db_managers_query = conn.execute("SELECT fio FROM staff WHERE role = 'Manager'").fetchall()
+    all_managers = {row['fio'] for row in db_managers_query}
+    
+    # Предварительный проход по файлу для поиска новых менеджеров
+    for emp in employees_data:
+        if emp.get('role') == 'Manager':
+            all_managers.add(emp['fio'])
 
+    # Шаг 2: Основной цикл импорта с использованием полного списка менеджеров
     for emp in employees_data:
         try:
-            # Проверяем, существует ли сотрудник с таким IPN
-            cursor.execute("SELECT id FROM staff WHERE ipn = ?", (emp['ipn'],))
+            cursor.execute("SELECT id, vacation_days_per_year, remaining_vacation_days FROM staff WHERE ipn = ?", (emp['ipn'],))
             existing_employee = cursor.fetchone()
 
             manager_fio = emp.get('manager_fio')
-            # Если менеджер указан, но его нет в БД, считаем его NULL
             if manager_fio and manager_fio not in all_managers:
+                # Если менеджер указан, но его нет ни в БД, ни в этом файле, обнуляем
                 manager_fio = None
 
-            total_days = int(emp.get('total_vacation_days', 24))
+            vacation_days = int(emp.get('vacation_days_per_year', 24))
 
             if existing_employee:
-                # Обновляем существующего. Остаток дней отпуска НЕ трогаем при импорте.
+                old_total_days = existing_employee['vacation_days_per_year']
+                old_remaining_days = existing_employee['remaining_vacation_days']
+                days_diff = vacation_days - old_total_days
+                new_remaining_days = old_remaining_days + days_diff
+
                 cursor.execute("""
                     UPDATE staff
-                    SET fio = ?, position = ?, total_vacation_days = ?, manager_fio = ?
+                    SET fio = ?, role = ?, vacation_days_per_year = ?, remaining_vacation_days = ?, manager_fio = ?
                     WHERE ipn = ?
-                """, (emp['fio'], emp.get('position', ''), total_days, manager_fio, emp['ipn']))
+                """, (emp['fio'], emp.get('role', 'Employee'), vacation_days, new_remaining_days, manager_fio, emp['ipn']))
                 updated_count += 1
             else:
-                # Добавляем нового. Остаток дней равен общему количеству.
                 cursor.execute("""
-                    INSERT INTO staff (fio, ipn, position, total_vacation_days, remaining_vacation_days, manager_fio)
+                    INSERT INTO staff (fio, ipn, role, manager_fio, vacation_days_per_year, remaining_vacation_days)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (emp['fio'], emp['ipn'], emp.get('position', ''), total_days, total_days, manager_fio))
+                """, (emp['fio'], emp['ipn'], emp.get('role', 'Employee'), manager_fio, vacation_days, vacation_days))
                 imported_count += 1
         except Exception as e:
             errors.append(f"Ошибка для записи с IPN {emp.get('ipn', 'N/A')}: {str(e)}")

@@ -600,9 +600,6 @@ def update_manager_own_vacation_history(pathname):
     ]
     return columns, history_data
 
-if __name__ == '__main__':
-    app.run(debug=True)
-
 # --- Employee Dashboard: Vacation History Callback ---
 @app.callback(
     Output('employee-vacation-history-table', 'columns'),
@@ -627,3 +624,7 @@ def update_employee_vacation_history(pathname):
         {"name": "Всего дней", "id": "total_days"},
     ]
     return columns, history_data
+
+if __name__ == '__main__':
+    app.run(debug=True)
+

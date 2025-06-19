@@ -2,7 +2,7 @@ from dash import html, dash_table, dcc
 import dash_bootstrap_components as dbc
 
 layout = html.Div([
-    # --- ВОССТАНОВЛЕННЫЕ КРИТИЧЕСКИ ВАЖНЫЕ КОМПОНЕНТЫ ---
+    # --- Скрытые компоненты для хранения данных ---
     dcc.Store(id='hr-data-refresh-trigger'), 
     dcc.Store(id='hr-edit-employee-selected-id-store'),
     dcc.Store(id='hr-edit-employee-target-vacation-id-store'),
@@ -10,30 +10,11 @@ layout = html.Div([
     html.H2('HR Manager Dashboard'),
     html.Br(),
 
-    # --- Секция импорта, которую мы добавили ранее ---
-    dbc.Card([
-        dbc.CardHeader(html.H4("Импорт сотрудников из BAS/BAF")),
-        dbc.CardBody([
-            dcc.Upload(
-                id='upload-employee-data',
-                children=html.Div(['Перетащите или ', html.A('Выберите файл (CSV или Excel)')]),
-                style={
-                    'width': '100%', 'height': '60px', 'lineHeight': '60px',
-                    'borderWidth': '1px', 'borderStyle': 'dashed', 'borderRadius': '5px',
-                    'textAlign': 'center', 'margin': '10px'
-                },
-                multiple=False
-            ),
-            html.Div(id='output-data-upload-status'),
-        ])
-    ], className="mb-3"),
-
-    # --- Основная таблица сотрудников (с исправленным ID) ---
+    # --- Основная таблица сотрудников ---
     dbc.Card([
         dbc.CardHeader(html.H4("СОТРУДНИКИ")),
         dbc.CardBody([
             dash_table.DataTable(
-                # ID ИСПРАВЛЕН, ЧТОБЫ СООТВЕТСТВОВАТЬ КОЛБЭКУ В APP.PY
                 id='all-employees-table',
                 columns=[],
                 data=[],
@@ -47,7 +28,7 @@ layout = html.Div([
         ])
     ], className="mb-3"),
 
-    # --- Остальные блоки управления из оригинального файла ---
+    # --- Блоки управления (Добавить, Изменить, Добавить отпуск) ---
     dbc.Row([
         dbc.Col(md=4, children=[
             dbc.Card([
@@ -104,8 +85,9 @@ layout = html.Div([
         ])
     ]),
 
-    # ИСТОРИЯ ОТПУСКОВ
+    # --- Нижний ряд с историей, личными данными и импортом ---
     dbc.Row([
+        # --- Левая колонка: История отпусков ---
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader(html.H4("ИСТОРИЯ ОТПУСКОВ (текущий год)")),
@@ -121,11 +103,30 @@ layout = html.Div([
                 ])
             ], className="mb-3"),
         ], md=6),
+        # --- Правая колонка: Личные данные и Импорт ---
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader(html.H4("Мои личные данные отпуска")),
                 dbc.CardBody(id='hr-selected-employee-details-div', children=[
                     html.P("Загрузка данных...")
+                ])
+            ], className="mb-3"),
+
+            # --- ПЕРЕМЕЩЕННЫЙ БЛОК ИМПОРТА ---
+            dbc.Card([
+                dbc.CardHeader(html.H4("Импорт сотрудников из BAS/BAF")),
+                dbc.CardBody([
+                    dcc.Upload(
+                        id='upload-employee-data',
+                        children=html.Div(['Перетащите или ', html.A('Выберите файл (CSV или Excel)')]),
+                        style={
+                            'width': '100%', 'height': '60px', 'lineHeight': '60px',
+                            'borderWidth': '1px', 'borderStyle': 'dashed', 'borderRadius': '5px',
+                            'textAlign': 'center', 'margin': '10px'
+                        },
+                        multiple=False
+                    ),
+                    html.Div(id='output-data-upload-status'),
                 ])
             ], className="mb-3"),
         ], md=6)
