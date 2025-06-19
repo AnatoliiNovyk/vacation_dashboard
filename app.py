@@ -572,3 +572,28 @@ def update_manager_subordinates_vacations_table(pathname):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+# --- Employee Dashboard: Vacation History Callback ---
+@app.callback(
+    Output('employee-vacation-history-table', 'columns'),
+    Output('employee-vacation-history-table', 'data'),
+    Input('url', 'pathname')
+)
+def update_employee_vacation_history(pathname):
+    if pathname != '/employee' or 'user_ipn' not in session:
+        raise PreventUpdate
+
+    user_ipn = session.get('user_ipn')
+    employee = db_operations.get_employee_by_ipn(user_ipn)
+    if not employee:
+        return [], []
+
+    employee_id = employee['id']
+    history_data = db_operations.get_vacation_history_for_employee(employee_id)
+    
+    columns = [
+        {"name": "Начало", "id": "start_date"},
+        {"name": "Конец", "id": "end_date"},
+        {"name": "Всего дней", "id": "total_days"},
+    ]
+    return columns, history_data

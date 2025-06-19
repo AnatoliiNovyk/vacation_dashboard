@@ -398,3 +398,15 @@ if __name__ == '__main__':
     # print(f"\nVacation summary for IPN {test_ipn}:")
     # summary = get_employee_vacation_summary_by_ipn(test_ipn)
     # print(summary)
+def get_vacation_history_for_employee(employee_id):
+    """Отримує історію відпусток для конкретного співробітника."""
+    conn = get_db_connection()
+    query = """
+        SELECT start_date, end_date, total_days
+        FROM vacations
+        WHERE staff_id = ?
+        ORDER BY start_date DESC
+    """
+    history = conn.execute(query, (employee_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in history]
