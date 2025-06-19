@@ -6,3 +6,6 @@ data/__pycache__/
 components/__pycache__/
 auth/__pycache__/
 components/__init__.py
+data/*.sql
+data/*db
+data/*.csv

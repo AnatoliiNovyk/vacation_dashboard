@@ -3,3 +3,5 @@ dash-bootstrap-components
 flask
 pandas
 openpyxl
+gunicorn
+psycopg2-binary

@@ -625,6 +625,65 @@ def update_employee_vacation_history(pathname):
     ]
     return columns, history_data
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# --- HR Dashboard: File Import Callbacks ---
+
+def parse_contents(contents, filename):
+    """Разбирает содержимое загруженного файла (CSV или Excel)."""
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    try:
+        if 'csv' in filename:
+            df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+        elif 'xls' in filename or 'xlsx' in filename:
+            df = pd.read_excel(io.BytesIO(decoded))
+        else:
+            return None, "Неподдерживаемый формат файла. Используйте CSV или Excel."
+        
+        # Переименовываем столбцы для унификации
+        column_mapping = {
+            'ПІБ': 'fio',
+            'ІПН': 'ipn',
+            'Роль': 'role',
+            'Днів відпустки на рік': 'vacation_days_per_year',
+            'Керівник': 'manager_fio'
+        }
+        df.rename(columns=column_mapping, inplace=True)
+
+        required_columns = ['fio', 'ipn']
+        if not all(col in df.columns for col in required_columns):
+            missing = [c for c in required_columns if c not in df.columns]
+            return None, f"В файле отсутствуют обязательные столбцы: {', '.join(missing)} или их эквиваленты."
+
+        return df.to_dict('records'), None
+    except Exception as e:
+        return None, f"Ошибка при разборе файла: {e}"
+
+@app.callback(
+    Output('output-data-upload-status', 'children'),
+    Output('all-employees-table', 'data', allow_duplicate=True),
+    Input('upload-employee-data', 'contents'),
+    State('upload-employee-data', 'filename'),
+    prevent_initial_call=True
+)
+def handle_employee_import(contents, filename):
+    """Обрабатывает загрузку файла и инициирует импорт."""
+    if contents is not None:
+        employees_data, error_message = parse_contents(contents, filename)
+        
+        if error_message:
+            return html.Div(error_message, style={'color': 'red'}), no_update
+
+        imported_count, updated_count, errors = db_operations.batch_import_employees(employees_data)
+
+        success_msg = f"Импорт завершен. Добавлено: {imported_count}. Обновлено: {updated_count}."
+        error_msgs = [html.P(f"Ошибка: {e}", style={'color': 'red'}) for e in errors]
+        report = [html.P(success_msg)] + error_msgs
+        
+        refreshed_data = db_operations.get_all_employees()
+        return html.Div(report), refreshed_data
+        
+    return no_update, no_update
+
+#if __name__ == '__main__':
+#    app.run(debug=False)
 
