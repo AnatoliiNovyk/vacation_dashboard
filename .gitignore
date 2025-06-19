@@ -1,8 +1,8 @@
 __pycache__/
 venv/
 *.pyc
-utils/__pycache__
-data/__pycache__
-components/__pycache__
-auth/__pycache__
+utils/__pycache__/
+data/__pycache__/
+components/__pycache__/
+auth/__pycache__/
 components/__init__.py
