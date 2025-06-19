@@ -303,7 +303,7 @@ def update_vacation_history_table(pathname, refresh_trigger):
     [Output('hr-delete-employee-notification', 'children'),
      Output('hr-data-refresh-trigger', 'data', allow_duplicate=True)],
     [Input('hr-delete-employee-button', 'n_clicks')],
-    [State('hr-employees-table', 'selected_row_ids')],
+    [State('all-employees-table', 'selected_row_ids')],
     prevent_initial_call=True
 )
 def handle_delete_employee(n_clicks, selected_row_ids):
