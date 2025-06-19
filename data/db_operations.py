@@ -160,32 +160,6 @@ def get_vacation_history(year):
     conn.close()
     return [dict(row) for row in history]
 
-def get_employees_for_hr_table():
-    """Отримує дані співробітників для таблиці HR, включаючи останню/поточну відпустку."""
-    conn = get_db_connection()
-    _ensure_tables_exist(conn)
-    # This query is simplified: it gets the latest vacation by end_date.
-    # A more complex query might be needed for "current or next upcoming".
-    query = """
-    SELECT 
-        s.id, s.fio, s.ipn, s.role, s.manager_fio, s.remaining_vacation_days,
-        v.start_date AS current_vacation_start_date,
-        v.end_date AS current_vacation_end_date,
-        v.total_days AS current_vacation_total_days
-    FROM staff s
-    LEFT JOIN (
-        SELECT staff_id, start_date, end_date, total_days,
-               ROW_NUMBER() OVER (PARTITION BY staff_id ORDER BY end_date DESC) as rn
-        FROM vacations
-        WHERE date(end_date) >= date('now', '-30 days') -- Consider recent/future vacations
-    ) v ON s.id = v.staff_id AND v.rn = 1
-    ORDER BY s.fio;
-    """
-    # If no vacation found or it's old, the vacation fields will be NULL.
-    # The UI callback might need to handle NULLs (e.g., display 'N/A').
-    employees = conn.execute(query).fetchall()
-    conn.close()
-    return [dict(row) for row in employees]
 
 def get_employee_vacation_summary_by_ipn(ipn):
     """Отримує зведені дані про відпустку для співробітника за ІПН."""
@@ -314,29 +288,58 @@ def update_employee_data_and_vacation(employee_id: int, updates: dict):
     finally:
         conn.close()
 
-def get_subordinates_vacation_details(manager_fio: str) -> list[dict]:
+def get_subordinates_vacation_details(manager_fio):
     """
-    Отримує деталі відпусток для всіх підлеглих вказаного менеджера.
+    Получает детали отпусков для ВСЕХ подчиненных в иерархии (прямых и косвенных)
+    с использованием рекурсивного запроса.
     """
-    _ensure_tables_exist()
     conn = get_db_connection()
     query = """
+        WITH RECURSIVE SubordinateHierarchy AS (
+            -- Базовый случай: прямые подчиненные топ-менеджера
+            SELECT id, fio, ipn, role, manager_fio, remaining_vacation_days, vacation_days_per_year
+            FROM staff
+            WHERE manager_fio = :manager_name
+
+            UNION ALL
+
+            -- Рекурсивный шаг: сотрудники, которые подчиняются подчиненным, найденным на предыдущем шаге
+            SELECT s.id, s.fio, s.ipn, s.role, s.manager_fio, s.remaining_vacation_days, s.vacation_days_per_year
+            FROM staff s
+            INNER JOIN SubordinateHierarchy sh ON s.manager_fio = sh.fio
+        ),
+        LatestVacations AS (
+            -- Находим самый близкий к сегодняшнему дню отпуск (прошлый или будущий) для каждого сотрудника
+            SELECT
+                v.staff_id,
+                v.start_date,
+                v.end_date,
+                v.total_days,
+                ROW_NUMBER() OVER(PARTITION BY v.staff_id ORDER BY ABS(julianday(v.start_date) - julianday('now'))) as rn
+            FROM vacations v
+            INNER JOIN SubordinateHierarchy sh ON v.staff_id = sh.id
+        )
+        -- Теперь выбираем из иерархии и присоединяем данные о ближайшем отпуске
         SELECT
-            s.fio AS sub_fio,
-            s.ipn AS sub_ipn,
-            s.role AS sub_role,
-            v.start_date AS vac_start_date,
-            v.end_date AS vac_end_date,
-            v.total_days AS vac_total_days,
-            s.remaining_vacation_days AS sub_remaining_days
-        FROM staff s
-        JOIN vacations v ON s.id = v.staff_id
-        WHERE s.manager_fio = ?
-        ORDER BY s.fio, v.start_date;
+            h.fio AS sub_fio,
+            h.ipn AS sub_ipn,
+            h.role AS sub_role,
+            lv.start_date as vac_start_date,
+            lv.end_date as vac_end_date,
+            lv.total_days as vac_total_days,
+            h.remaining_vacation_days AS sub_remaining_days
+        FROM SubordinateHierarchy h
+        LEFT JOIN LatestVacations lv ON h.id = lv.staff_id AND lv.rn = 1
+        ORDER BY h.fio;
     """
-    subordinates_vacations = conn.execute(query, (manager_fio,)).fetchall()
-    conn.close()
-    return [dict(row) for row in subordinates_vacations]
+    try:
+        subordinates = conn.execute(query, {'manager_name': manager_fio}).fetchall()
+        conn.close()
+        return [dict(row) for row in subordinates]
+    except Exception as e:
+        print(f"Recursive query failed: {e}")
+        conn.close()
+        return []
 
 def delete_employee(employee_id: int) -> tuple[bool, str]:
     """Deletes an employee, their vacations, and nullifies manager references."""
@@ -410,3 +413,52 @@ def get_vacation_history_for_employee(employee_id):
     history = conn.execute(query, (employee_id,)).fetchall()
     conn.close()
     return [dict(row) for row in history]
+
+def batch_import_employees(employees_data):
+    """
+    Пакетный импорт или обновление сотрудников.
+    employees_data - это список словарей, где каждый словарь представляет сотрудника.
+    Ожидаемые ключи: 'fio', 'ipn', 'position', 'total_vacation_days', 'manager_fio'.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    imported_count = 0
+    updated_count = 0
+    errors = []
+
+    all_managers = {row['fio'] for row in get_all_employees()}
+
+    for emp in employees_data:
+        try:
+            # Проверяем, существует ли сотрудник с таким IPN
+            cursor.execute("SELECT id FROM staff WHERE ipn = ?", (emp['ipn'],))
+            existing_employee = cursor.fetchone()
+
+            manager_fio = emp.get('manager_fio')
+            # Если менеджер указан, но его нет в БД, считаем его NULL
+            if manager_fio and manager_fio not in all_managers:
+                manager_fio = None
+
+            total_days = int(emp.get('total_vacation_days', 24))
+
+            if existing_employee:
+                # Обновляем существующего. Остаток дней отпуска НЕ трогаем при импорте.
+                cursor.execute("""
+                    UPDATE staff
+                    SET fio = ?, position = ?, total_vacation_days = ?, manager_fio = ?
+                    WHERE ipn = ?
+                """, (emp['fio'], emp.get('position', ''), total_days, manager_fio, emp['ipn']))
+                updated_count += 1
+            else:
+                # Добавляем нового. Остаток дней равен общему количеству.
+                cursor.execute("""
+                    INSERT INTO staff (fio, ipn, position, total_vacation_days, remaining_vacation_days, manager_fio)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (emp['fio'], emp['ipn'], emp.get('position', ''), total_days, total_days, manager_fio))
+                imported_count += 1
+        except Exception as e:
+            errors.append(f"Ошибка для записи с IPN {emp.get('ipn', 'N/A')}: {str(e)}")
+
+    conn.commit()
+    conn.close()
+    return imported_count, updated_count, errors

@@ -2,36 +2,54 @@ from dash import html, dash_table, dcc
 import dash_bootstrap_components as dbc
 
 layout = html.Div([
-    dcc.Store(id='hr-data-refresh-trigger'), # Used to trigger data refreshes
+    # --- ВОССТАНОВЛЕННЫЕ КРИТИЧЕСКИ ВАЖНЫЕ КОМПОНЕНТЫ ---
+    dcc.Store(id='hr-data-refresh-trigger'), 
     dcc.Store(id='hr-edit-employee-selected-id-store'),
     dcc.Store(id='hr-edit-employee-target-vacation-id-store'),
+
     html.H2('HR Manager Dashboard'),
     html.Br(),
-    # Блок списка сотрудников "СОТРУДНИКИ"
+
+    # --- Секция импорта, которую мы добавили ранее ---
+    dbc.Card([
+        dbc.CardHeader(html.H4("Импорт сотрудников из BAS/BAF")),
+        dbc.CardBody([
+            dcc.Upload(
+                id='upload-employee-data',
+                children=html.Div(['Перетащите или ', html.A('Выберите файл (CSV или Excel)')]),
+                style={
+                    'width': '100%', 'height': '60px', 'lineHeight': '60px',
+                    'borderWidth': '1px', 'borderStyle': 'dashed', 'borderRadius': '5px',
+                    'textAlign': 'center', 'margin': '10px'
+                },
+                multiple=False
+            ),
+            html.Div(id='output-data-upload-status'),
+        ])
+    ], className="mb-3"),
+
+    # --- Основная таблица сотрудников (с исправленным ID) ---
     dbc.Card([
         dbc.CardHeader(html.H4("СОТРУДНИКИ")),
         dbc.CardBody([
             dash_table.DataTable(
-                id='hr-employees-table',
-                columns=[], # Populated by callback
-                data=[],    # Populated by callback
-                row_selectable='single', # Changed to 'single' for radio button selection
+                # ID ИСПРАВЛЕН, ЧТОБЫ СООТВЕТСТВОВАТЬ КОЛБЭКУ В APP.PY
+                id='all-employees-table',
+                columns=[],
+                data=[],
+                row_selectable='single',
                 page_size=10,
                 style_cell={'textAlign': 'left'},
-                style_header={
-                    'backgroundColor': 'rgb(230, 230, 230)',
-                    'fontWeight': 'bold'
-                }
+                style_header={'backgroundColor': 'rgb(230, 230, 230)', 'fontWeight': 'bold'}
             ),
             dbc.Button("УДАЛИТЬ", id='hr-delete-employee-button', color="danger", className="mt-2 me-2"),
-            html.Div(id='hr-delete-employee-notification', className="mt-2"
-            )
+            html.Div(id='hr-delete-employee-notification', className="mt-2")
         ])
     ], className="mb-3"),
 
+    # --- Остальные блоки управления из оригинального файла ---
     dbc.Row([
         dbc.Col(md=4, children=[
-            # Блок добавления нового сотрудника "ДОБАВИТЬ СОТРУДНИКА"
             dbc.Card([
                 dbc.CardHeader(html.H4("ДОБАВИТЬ СОТРУДНИКА")),
                 dbc.CardBody([
@@ -42,16 +60,14 @@ layout = html.Div([
                         {'label': 'Manager', 'value': 'Manager'},
                         {'label': 'HR Manager', 'value': 'HR Manager'}
                     ], placeholder='Роль', className="mb-2"),
-                    dcc.Dropdown(id='hr-add-employee-manager-dropdown', options=[], placeholder='Менеджер', className="mb-2"), # Populated by callback
+                    dcc.Dropdown(id='hr-add-employee-manager-dropdown', options=[], placeholder='Менеджер', className="mb-2"),
                     dbc.Input(id='hr-add-employee-vacation-days-input', type='number', placeholder='Отпуск в текущем году (дней)', className="mb-2"),
                     dbc.Button("ДОБАВИТЬ", id='hr-add-employee-submit-button', color="primary", className="me-2"),
                     html.Div(id='hr-add-employee-notification', className="mt-2")
                 ])
             ], className="mb-3"),
         ]),
-
         dbc.Col(md=4, children=[
-            # Новый блок "ИЗМЕНИТЬ ДАННЫЕ СОТРУДНИКА"
             dbc.Card([
                 dbc.CardHeader(html.H4("ИЗМЕНИТЬ ДАННЫЕ СОТРУДНИКА")),
                 dbc.CardBody([
@@ -70,13 +86,11 @@ layout = html.Div([
                 ])
             ], className="mb-3"),
         ]),
-
         dbc.Col(md=4, children=[
-            # Блок добавления отпуска сотрудника "ДОБАВИТЬ ОТПУСК"
             dbc.Card([
                 dbc.CardHeader(html.H4("ДОБАВИТЬ ОТПУСК")),
                 dbc.CardBody([
-                    dcc.Dropdown(id='hr-add-vacation-employee-dropdown', options=[], placeholder='Ф.И.О. сотрудника', className="mb-2"), # Populated by callback
+                    dcc.Dropdown(id='hr-add-vacation-employee-dropdown', options=[], placeholder='Ф.И.О. сотрудника', className="mb-2"),
                     html.P("Дата начала отпуска:", className="mb-1"),
                     dcc.DatePickerSingle(id='hr-add-vacation-start-date', placeholder='С', display_format='YYYY-MM-DD', className="mb-2 d-block"),
                     html.P("Дата окончания отпуска:", className="mb-1"),
@@ -90,29 +104,24 @@ layout = html.Div([
         ])
     ]),
 
+    # ИСТОРИЯ ОТПУСКОВ
     dbc.Row([
         dbc.Col([
-            # Блок истории отгулянных отпусков "ИСТОРИЯ ОТПУСКОВ"
             dbc.Card([
                 dbc.CardHeader(html.H4("ИСТОРИЯ ОТПУСКОВ (текущий год)")),
                 dbc.CardBody([
                     dash_table.DataTable(
                         id='hr-vacation-history-table',
-                        columns=[], # Populated by callback
-                        data=[],    # Populated by callback
+                        columns=[],
+                        data=[],
                         page_size=10,
                         style_cell={'textAlign': 'left'},
-                        style_header={
-                            'backgroundColor': 'rgb(230, 230, 230)',
-                            'fontWeight': 'bold'
-                        }
+                        style_header={'backgroundColor': 'rgb(230, 230, 230)', 'fontWeight': 'bold'}
                     )
                 ])
             ], className="mb-3"),
         ], md=6),
-
         dbc.Col([
-            # Блок пользователя "Личные данные отпуска сотрудника"
             dbc.Card([
                 dbc.CardHeader(html.H4("Мои личные данные отпуска")),
                 dbc.CardBody(id='hr-selected-employee-details-div', children=[

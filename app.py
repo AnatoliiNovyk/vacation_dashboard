@@ -1,3 +1,8 @@
+import base64
+import io
+import pandas as pd
+from dash.exceptions import PreventUpdate
+from dash import no_update
 from dash import Dash, dcc, html, Input, Output, State
 from flask import Flask, session, redirect, request
 import dash
@@ -134,27 +139,26 @@ def display_page_content(pathname):
 
 # --- HR Dashboard Callbacks ---
 @app.callback(
-    Output('hr-employees-table', 'columns'),
-    Output('hr-employees-table', 'data'),
+    Output('all-employees-table', 'columns'), # ИСПРАВЛЕНО
+    Output('all-employees-table', 'data'),   # ИСПРАВЛЕНО
     Input('url', 'pathname'),
-    Input('hr-data-refresh-trigger', 'data') # Store component to trigger refresh
+    Input('hr-data-refresh-trigger', 'data') 
 )
 def update_hr_employees_table(pathname, refresh_trigger):
     if pathname != '/hr':
         raise PreventUpdate
 
+    # Используем более простой и надежный источник данных, который соответствует колонкам
     columns = [
-        {"name": "Ф.И.О.", "id": "fio"},
-        {"name": "ИПН", "id": "ipn"},
+        {"name": "ФИО", "id": "fio"},
+        {"name": "ИНН", "id": "ipn"},
         {"name": "Роль", "id": "role"},
-        {"name": "Менеджер", "id": "manager_fio"},
-        {"name": "С", "id": "current_vacation_start_date"},
-        {"name": "До", "id": "current_vacation_end_date"},
-        {"name": "Всего", "id": "current_vacation_total_days"},
-        {"name": "Остаток", "id": "remaining_vacation_days"}
+        {"name": "Руководитель", "id": "manager_fio"},
+        {"name": "Всего дней отпуска", "id": "vacation_days_per_year"},
+        {"name": "Остаток дней", "id": "remaining_vacation_days"},
     ]
-    # This function needs to be implemented in db_operations to fetch combined data
-    employees_data = db_operations.get_employees_for_hr_table()
+    # Используем простую функцию get_all_employees() для прямого отображения всех сотрудников
+    employees_data = db_operations.get_all_employees()
     return columns, employees_data
 
 @app.callback(
@@ -569,6 +573,32 @@ def update_manager_subordinates_vacations_table(pathname):
 
 # TODO: Add callbacks for employee-table and manager-table if they are meant to list
 # all vacations for the current user.
+
+# --- Manager Dashboard: Own Vacation History Callback ---
+@app.callback(
+    Output('manager-table', 'columns'),
+    Output('manager-table', 'data'),
+    Input('url', 'pathname')
+)
+def update_manager_own_vacation_history(pathname):
+    if pathname != '/manager' or 'user_ipn' not in session:
+        raise PreventUpdate
+
+    user_ipn = session.get('user_ipn')
+    manager = db_operations.get_employee_by_ipn(user_ipn)
+    if not manager:
+        return [], []
+    
+    manager_id = manager['id']
+    # Предполагается, что у тебя уже есть эта функция в db_operations.py, как я приказывал
+    history_data = db_operations.get_vacation_history_for_employee(manager_id)
+
+    columns = [
+        {"name": "Мои отпуска: Начало", "id": "start_date"},
+        {"name": "Конец", "id": "end_date"},
+        {"name": "Всего дней", "id": "total_days"},
+    ]
+    return columns, history_data
 
 if __name__ == '__main__':
     app.run(debug=True)

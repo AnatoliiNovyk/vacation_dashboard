@@ -34,28 +34,3 @@ layout = html.Div([
     ]),
     dash_table.DataTable(id='manager-table', columns=[], data=[], page_size=10) # For manager's own vacation list
 ])
-
-# --- Manager Dashboard: Own Vacation History Callback ---
-@app.callback(
-    Output('manager-table', 'columns'),
-    Output('manager-table', 'data'),
-    Input('url', 'pathname')
-)
-def update_manager_own_vacation_history(pathname):
-    if pathname != '/manager' or 'user_ipn' not in session:
-        raise PreventUpdate
-
-    user_ipn = session.get('user_ipn')
-    manager = db_operations.get_employee_by_ipn(user_ipn)
-    if not manager:
-        return [], []
-    
-    manager_id = manager['id']
-    history_data = db_operations.get_vacation_history_for_employee(manager_id)
-
-    columns = [
-        {"name": "Мои отпуска: Начало", "id": "start_date"},
-        {"name": "Конец", "id": "end_date"},
-        {"name": "Всего дней", "id": "total_days"},
-    ]
-    return columns, history_data
