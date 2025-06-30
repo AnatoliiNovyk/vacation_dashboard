@@ -277,13 +277,13 @@ def update_employee_data_and_vacation(employee_id: int, updates: dict):
         cursor.execute('UPDATE staff SET remaining_vacation_days = ? WHERE id = ?', (final_remaining_vacation_days, employee_id))
 
         conn.commit()
-        return True, "Данные сотрудника успешно обновлены."
+        return True, "Дані співробітника успішно оновлені."
     except sqlite3.IntegrityError: # Handles unique constraint violation for IPN
         conn.rollback()
-        return False, "Ошибка: ИПН уже существует для другого сотрудника."
+        return False, "Помилка: ІПН вже існує для іншого співробітника."
     except Exception as e:
         conn.rollback()
-        print(f"Ошибка обновления данных сотрудника: {e}")
+        print(f"Помилка оновлення даних співробітника: {e}")
         return False, f"Произошла ошибка: {e}"
     finally:
         conn.close()
@@ -296,20 +296,20 @@ def get_subordinates_vacation_details(manager_fio):
     conn = get_db_connection()
     query = """
         WITH RECURSIVE SubordinateHierarchy AS (
-            -- Базовый случай: прямые подчиненные топ-менеджера
+            -- Базовий випадок: прямі підлеглі топ-менеджера
             SELECT id, fio, ipn, role, manager_fio, remaining_vacation_days, vacation_days_per_year
             FROM staff
             WHERE manager_fio = :manager_name
 
             UNION ALL
 
-            -- Рекурсивный шаг: сотрудники, которые подчиняются подчиненным, найденным на предыдущем шаге
+            -- Рекурсивний крок: співробітники, які підпорядковуються підлеглим, знайденим на попередньому кроці
             SELECT s.id, s.fio, s.ipn, s.role, s.manager_fio, s.remaining_vacation_days, s.vacation_days_per_year
             FROM staff s
             INNER JOIN SubordinateHierarchy sh ON s.manager_fio = sh.fio
         ),
         LatestVacations AS (
-            -- Находим самый близкий к сегодняшнему дню отпуск (прошлый или будущий) для каждого сотрудника
+            -- Знаходимо найближчу до сьогоднішнього дня відпустку (минулу чи майбутню) для кожного співробітника
             SELECT
                 v.staff_id,
                 v.start_date,
@@ -319,7 +319,7 @@ def get_subordinates_vacation_details(manager_fio):
             FROM vacations v
             INNER JOIN SubordinateHierarchy sh ON v.staff_id = sh.id
         )
-        -- Теперь выбираем из иерархии и присоединяем данные о ближайшем отпуске
+        -- Тепер обираємо з ієрархії та приєднуємо дані про найближчу відпустку
         SELECT
             h.fio AS sub_fio,
             h.ipn AS sub_ipn,
@@ -416,8 +416,8 @@ def get_vacation_history_for_employee(employee_id):
 
 def batch_import_employees(employees_data):
     """
-    Пакетный импорт или обновление сотрудников. Усовершенствованная версия,
-    которая корректно обрабатывает менеджеров, определенных в том же файле.
+    Пакетний імпорт або оновлення співробітників. Усовершенствованная версія,
+    яка коректно обробляє менеджерів, визначених в тому ж файлі.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -425,16 +425,16 @@ def batch_import_employees(employees_data):
     updated_count = 0
     errors = []
 
-    # Шаг 1: Собрать всех известных менеджеров (из БД и из текущего файла)
+    # Шаг 1: Собрати всіх відомих менеджерів (з БД і з поточного файлу)
     db_managers_query = conn.execute("SELECT fio FROM staff WHERE role = 'Manager'").fetchall()
     all_managers = {row['fio'] for row in db_managers_query}
     
-    # Предварительный проход по файлу для поиска новых менеджеров
+    # Попередній прохід по файлу для пошуку нових менеджерів
     for emp in employees_data:
         if emp.get('role') == 'Manager':
             all_managers.add(emp['fio'])
 
-    # Шаг 2: Основной цикл импорта с использованием полного списка менеджеров
+    # Шаг 2: Основний цикл імпорту з використанням повного списку менеджерів
     for emp in employees_data:
         try:
             cursor.execute("SELECT id, vacation_days_per_year, remaining_vacation_days FROM staff WHERE ipn = ?", (emp['ipn'],))
@@ -442,7 +442,7 @@ def batch_import_employees(employees_data):
 
             manager_fio = emp.get('manager_fio')
             if manager_fio and manager_fio not in all_managers:
-                # Если менеджер указан, но его нет ни в БД, ни в этом файле, обнуляем
+                # Якщо менеджер вказаний, але його немає ні в БД, ні в цьому файлі, обнуляємо
                 manager_fio = None
 
             vacation_days = int(emp.get('vacation_days_per_year', 24))
