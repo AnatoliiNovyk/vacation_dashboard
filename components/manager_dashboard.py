@@ -7,7 +7,7 @@ layout = html.Div([
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader(html.H4("ОТПУСКА ПОДЧИНЕННЫХ СОТРУДНИКОВ")),
+                dbc.CardHeader(html.H4("ВІДПУСТКИ ПІДЛЕГЛИХ  СПІВРОБІТНИКІВ")),
                 dbc.CardBody([
                     dash_table.DataTable(
                         id='subordinates-table',
@@ -25,7 +25,7 @@ layout = html.Div([
         ], md=6),
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader(html.H4("Мои личные данные отпуска")),
+                dbc.CardHeader(html.H4("Мої особисті дані  про відпустку")),
                 dbc.CardBody(id='manager-personal-vacation-details-div', children=[
                     html.P("Загрузка данных...")
                 ])
