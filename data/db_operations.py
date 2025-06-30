@@ -260,7 +260,7 @@ def update_employee_data_and_vacation(employee_id: int, updates: dict):
                 if new_total_days_for_target_vacation <= 0:
                     conn.rollback()
                     conn.close()
-                    return False, "Некорректный период отпуска."
+                    return False, "Некорректний період відпустки."
 
                 cursor.execute('UPDATE vacations SET start_date = ?, end_date = ?, total_days = ? WHERE id = ?',
                                (new_vacation_start_date, new_vacation_end_date, new_total_days_for_target_vacation, target_vacation_id))
@@ -466,8 +466,5 @@ def batch_import_employees(employees_data):
                 """, (emp['fio'], emp['ipn'], emp.get('role', 'Employee'), manager_fio, vacation_days, vacation_days))
                 imported_count += 1
         except Exception as e:
-            errors.append(f"Ошибка для записи с IPN {emp.get('ipn', 'N/A')}: {str(e)}")
-
-    conn.commit()
-    conn.close()
-    return imported_count, updated_count, errors
+            errors.append(f"Помилка для запису з ІПН {emp.get('ipn', 'N/A')}: {str(e)}")
+            conn.rollback
