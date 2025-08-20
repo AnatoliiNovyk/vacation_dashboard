@@ -4,4 +4,6 @@ flask
 pandas
 openpyxl
 gunicorn
-psycopg2-binary
+bleach
+python-dotenv
+Werkzeug

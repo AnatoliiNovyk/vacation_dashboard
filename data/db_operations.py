@@ -1,12 +1,22 @@
 import sqlite3
 from datetime import datetime, date
 from utils import date_utils # Ensure date_utils is imported
+from utils.logger import log_error, log_user_action
+from utils.security import sanitize_input, validate_ipn, validate_date_format
+import logging
 
 DB_PATH = 'data/vacations.db' # Шлях до файлу бази даних
+logger = logging.getLogger(__name__)
 
 def get_db_connection():
     """Встановлює з'єднання з базою даних SQLite."""
-    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA foreign_keys = ON")  # Увімкнення foreign keys
+        conn.execute("PRAGMA journal_mode = WAL")  # Покращення продуктивності
+    except sqlite3.Error as e:
+        logger.error(f"Database connection error: {e}")
+        raise
     conn.row_factory = sqlite3.Row # Дозволяє звертатися до колонок за іменем
     return conn
 
@@ -72,6 +82,20 @@ def get_employee_by_id(employee_id):
 
 def add_employee(fio, ipn, manager_fio, role, vacation_days_per_year, remaining_vacation_days=None):
     """Додає нового співробітника в базу даних."""
+    # Валідація та очищення вхідних даних
+    fio = sanitize_input(fio)
+    ipn = sanitize_input(ipn)
+    manager_fio = sanitize_input(manager_fio) if manager_fio else None
+    role = sanitize_input(role)
+    
+    if not validate_ipn(ipn):
+        logger.warning(f"Invalid IPN format attempted: {ipn[:3]}***")
+        return None
+    
+    if not fio or not role:
+        logger.warning("Missing required fields for employee creation")
+        return None
+    
     if remaining_vacation_days is None:
         remaining_vacation_days = vacation_days_per_year
     
@@ -85,9 +109,14 @@ def add_employee(fio, ipn, manager_fio, role, vacation_days_per_year, remaining_
         """, (fio, ipn, manager_fio, role, vacation_days_per_year, remaining_vacation_days))
         conn.commit()
         employee_id = cursor.lastrowid
+        logger.info(f"Employee added successfully: ID {employee_id}")
     except sqlite3.IntegrityError as e:
         conn.rollback()
-        print(f"Помилка додавання співробітника: {e}") # Або можна підняти виключення
+        logger.error(f"Employee creation failed - integrity error: {e}")
+        return None
+    except sqlite3.Error as e:
+        conn.rollback()
+        logger.error(f"Employee creation failed - database error: {e}")
         return None
     finally:
         conn.close()
@@ -112,6 +141,15 @@ def get_managers():
 
 def add_vacation(employee_id, start_date, end_date, total_days):
     """Додає відпустку для співробітника та оновлює залишок днів."""
+    # Валідація дат
+    if not validate_date_format(start_date) or not validate_date_format(end_date):
+        logger.warning(f"Invalid date format for vacation: {start_date} - {end_date}")
+        return False
+    
+    if total_days <= 0:
+        logger.warning(f"Invalid vacation days count: {total_days}")
+        return False
+    
     conn = get_db_connection()
     _ensure_tables_exist(conn)
     cursor = conn.cursor()
@@ -119,7 +157,7 @@ def add_vacation(employee_id, start_date, end_date, total_days):
         # Перевірка чи достатньо днів відпустки
         employee = conn.execute('SELECT remaining_vacation_days FROM staff WHERE id = ?', (employee_id,)).fetchone()
         if not employee or employee['remaining_vacation_days'] < total_days:
-            print(f"Недостатньо днів відпустки для співробітника ID {employee_id}.")
+            logger.warning(f"Insufficient vacation days for employee ID {employee_id}")
             conn.close()
             return False
 
@@ -137,10 +175,11 @@ def add_vacation(employee_id, start_date, end_date, total_days):
         """, (new_remaining_days, employee_id))
         
         conn.commit()
+        logger.info(f"Vacation added successfully for employee ID {employee_id}")
         return True
     except sqlite3.Error as e:
         conn.rollback()
-        print(f"Помилка додавання відпустки: {e}")
+        logger.error(f"Vacation creation failed: {e}")
         return False
     finally:
         conn.close()
@@ -343,6 +382,10 @@ def get_subordinates_vacation_details(manager_fio):
 
 def delete_employee(employee_id: int) -> tuple[bool, str]:
     """Deletes an employee, their vacations, and nullifies manager references."""
+    if not isinstance(employee_id, int) or employee_id <= 0:
+        logger.warning(f"Invalid employee ID for deletion: {employee_id}")
+        return False, "Некоректний ID співробітника"
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -368,10 +411,11 @@ def delete_employee(employee_id: int) -> tuple[bool, str]:
         cursor.execute("DELETE FROM staff WHERE id = ?", (employee_id,))
         
         conn.commit()
+        logger.info(f"Employee deleted successfully: ID {employee_id}")
         return True, "Сотрудник успешно удален."
     except sqlite3.Error as e:
         conn.rollback()
-        print(f"Ошибка удаления сотрудника ID {employee_id}: {e}")
+        logger.error(f"Employee deletion failed for ID {employee_id}: {e}")
         return False, f"Ошибка удаления сотрудника: {e}"
     finally:
         conn.close()
@@ -419,6 +463,10 @@ def batch_import_employees(employees_data):
     Пакетний імпорт або оновлення співробітників. Усовершенствованная версія,
     яка коректно обробляє менеджерів, визначених в тому ж файлі.
     """
+    if not employees_data:
+        logger.warning("Empty employee data provided for batch import")
+        return 0, 0, ["Порожні дані для імпорту"]
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     imported_count = 0
@@ -437,6 +485,18 @@ def batch_import_employees(employees_data):
     # Шаг 2: Основний цикл імпорту з використанням повного списку менеджерів
     for emp in employees_data:
         try:
+            # Валідація та очищення даних
+            emp['fio'] = sanitize_input(emp.get('fio', ''))
+            emp['ipn'] = sanitize_input(emp.get('ipn', ''))
+            
+            if not emp['fio'] or not emp['ipn']:
+                errors.append(f"Пропущені обов'язкові поля для запису: {emp}")
+                continue
+                
+            if not validate_ipn(emp['ipn']):
+                errors.append(f"Некоректний ІПН: {emp['ipn']}")
+                continue
+            
             cursor.execute("SELECT id, vacation_days_per_year, remaining_vacation_days FROM staff WHERE ipn = ?", (emp['ipn'],))
             existing_employee = cursor.fetchone()
 
@@ -467,4 +527,17 @@ def batch_import_employees(employees_data):
                 imported_count += 1
         except Exception as e:
             errors.append(f"Помилка для запису з ІПН {emp.get('ipn', 'N/A')}: {str(e)}")
-            conn.rollback
+            logger.error(f"Batch import error for IPN {emp.get('ipn', 'N/A')}: {e}")
+            continue
+    
+    try:
+        conn.commit()
+        logger.info(f"Batch import completed: {imported_count} imported, {updated_count} updated, {len(errors)} errors")
+    except sqlite3.Error as e:
+        conn.rollback()
+        logger.error(f"Batch import commit failed: {e}")
+        errors.append(f"Помилка збереження змін: {e}")
+    finally:
+        conn.close()
+    
+    return imported_count, updated_count, errors

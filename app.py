@@ -14,13 +14,41 @@ from utils import date_utils
 import dash_bootstrap_components as dbc
 import os # For secret key generation
 from datetime import datetime
+from config import config
+from utils.logger import setup_logger, log_user_action, log_error
+from utils.security import (
+    validate_ipn, sanitize_input, validate_date_format, 
+    generate_csrf_token, rate_limit_check, hash_sensitive_data
+)
+import logging
 
 server = Flask(__name__)
-# Use a secure secret key, e.g., from environment variable or generated
-server.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24)) # Використовуйте змінну середовища або згенерований ключ як запасний варіант
+
+# Завантаження конфігурації
+config_name = os.environ.get('FLASK_ENV', 'development')
+server.config.from_object(config[config_name])
+
+# Налаштування логування
+logger = setup_logger(server)
 
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
+
+# Обробка помилок
+@server.errorhandler(404)
+def not_found_error(error):
+    logger.warning(f"404 error: {request.url}")
+    return "Сторінка не знайдена", 404
+
+@server.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 error: {error}")
+    return "Внутрішня помилка сервера", 500
+
+@server.errorhandler(403)
+def forbidden_error(error):
+    logger.warning(f"403 error: Access denied for {session.get('user_ipn', 'anonymous')}")
+    return "Доступ заборонено", 403
 
 # Login page layout function
 def login_page_layout():
@@ -83,21 +111,42 @@ def update_user_header(pathname):
 def process_login(n_clicks_login_btn, n_submit_ipn_field, ipn):
     if not ipn:
         return dash.no_update, dbc.Alert("Будь ласка, введіть ІПН.", color="warning")
+    
+    # Очищення та валідація ІПН
+    ipn = sanitize_input(ipn)
+    if not validate_ipn(ipn):
+        log_user_action(logger, hash_sensitive_data(ipn), "invalid_login_attempt", "Invalid IPN format")
+        return dash.no_update, dbc.Alert("Некоректний формат ІПН.", color="danger")
+    
+    # Перевірка обмеження швидкості
+    if not rate_limit_check(hash_sensitive_data(ipn), "login_attempt"):
+        log_user_action(logger, hash_sensitive_data(ipn), "rate_limit_exceeded", "Too many login attempts")
+        return dash.no_update, dbc.Alert("Забагато спроб входу. Спробуйте пізніше.", color="danger")
 
-    employee = db_operations.get_employee_by_ipn(ipn)
+    try:
+        employee = db_operations.get_employee_by_ipn(ipn)
+    except Exception as e:
+        log_error(logger, e, "Database error during login")
+        return dash.no_update, dbc.Alert("Помилка системи. Спробуйте пізніше.", color="danger")
 
     if employee: # User found, IPN is effectively the password
         session['user_ipn'] = employee['ipn']
         session['user_role'] = employee['role']
         session['user_fio'] = employee.get('fio', employee['ipn']) # Store FIO if available
+        session['csrf_token'] = generate_csrf_token()
+        session.permanent = True
+        
+        log_user_action(logger, hash_sensitive_data(employee['ipn']), "successful_login", f"Role: {employee['role']}")
 
         redirect_path = ROLE_PATHS.get(employee['role'])
         if redirect_path:
             return redirect_path, dbc.Alert(f"Успішний вхід. Перенаправлення...", color="success", duration=2000)
         else:
             session.clear() 
+            log_error(logger, "Unknown role during login", f"Role: {employee['role']}")
             return dash.no_update, dbc.Alert("Помилка: Роль користувача не налаштована для перенаправлення.", color="danger")
     else: # User not found or IPN incorrect
+        log_user_action(logger, hash_sensitive_data(ipn), "failed_login_attempt", "Employee not found")
         return dash.no_update, dbc.Alert("Помилка: Співробітника з таким ІПН не знайдено.", color="danger")
 
 
@@ -113,6 +162,8 @@ def display_page_content(pathname):
     authenticated_role = session.get('user_role')
 
     if pathname == '/logout':
+        if authenticated_ipn:
+            log_user_action(logger, hash_sensitive_data(authenticated_ipn), "logout", "User logged out")
         session.clear()
         return login_page_layout(), '/login'
 
@@ -185,16 +236,34 @@ def update_manager_dropdown(pathname):
 def handle_add_employee(n_clicks, fio, ipn, role, manager_fio, vacation_days):
     if not n_clicks:
         raise PreventUpdate
+    
+    # Валідація вхідних даних
+    fio = sanitize_input(fio) if fio else ""
+    ipn = sanitize_input(ipn) if ipn else ""
+    role = sanitize_input(role) if role else ""
+    manager_fio = sanitize_input(manager_fio) if manager_fio else None
+    
     if not all([fio, ipn, role, vacation_days]): # Manager can be optional for top HR/Manager
         return dbc.Alert("Заполните все обязательные поля (Ф.И.О., ИПН, Роль, Отпуск в году).", color="warning"), dash.no_update
     
+    if not validate_ipn(ipn):
+        return dbc.Alert("Некоректний формат ІПН.", color="danger"), dash.no_update
+    
     try:
         vacation_days = int(vacation_days)
+        if vacation_days < 0 or vacation_days > 365:
+            return dbc.Alert("Некоректна кількість днів відпустки.", color="danger"), dash.no_update
     except ValueError:
         return dbc.Alert("Количество дней отпуска должно быть числом.", color="danger"), dash.no_update
 
-    employee_id = db_operations.add_employee(fio, ipn, manager_fio, role, vacation_days, vacation_days)
+    try:
+        employee_id = db_operations.add_employee(fio, ipn, manager_fio, role, vacation_days, vacation_days)
+    except Exception as e:
+        log_error(logger, e, "Error adding employee")
+        return dbc.Alert("Помилка системи при додаванні співробітника.", color="danger"), dash.no_update
+    
     if employee_id:
+        log_user_action(logger, hash_sensitive_data(session.get('user_ipn', '')), "add_employee", f"Added employee: {hash_sensitive_data(ipn)}")
         return dbc.Alert(f"Сотрудник {fio} успешно добавлен.", color="success"), {'timestamp': datetime.now().timestamp()}
     else:
         return dbc.Alert(f"Ошибка добавления сотрудника {fio}.", color="danger"), dash.no_update
@@ -264,15 +333,28 @@ def handle_add_vacation(n_clicks, employee_id, start_date, end_date):
     if not all([employee_id, start_date, end_date]):
         return dbc.Alert("Выберите сотрудника и укажите даты отпуска.", color="warning"), dash.no_update
 
+    # Валідація дат
+    if not validate_date_format(start_date) or not validate_date_format(end_date):
+        return dbc.Alert("Некоректний формат дат.", color="danger"), dash.no_update
+
     try:
         total_days = date_utils.calculate_days(start_date, end_date)
         if total_days <= 0:
             return dbc.Alert("Некорректный период отпуска.", color="danger"), dash.no_update
     except ValueError:
         return dbc.Alert("Неверный формат дат.", color="danger"), dash.no_update
+    except Exception as e:
+        log_error(logger, e, "Error calculating vacation days")
+        return dbc.Alert("Помилка обчислення днів відпустки.", color="danger"), dash.no_update
 
-    success = db_operations.add_vacation(employee_id, start_date, end_date, total_days)
+    try:
+        success = db_operations.add_vacation(employee_id, start_date, end_date, total_days)
+    except Exception as e:
+        log_error(logger, e, "Error adding vacation")
+        return dbc.Alert("Помилка системи при додаванні відпустки.", color="danger"), dash.no_update
+    
     if success:
+        log_user_action(logger, hash_sensitive_data(session.get('user_ipn', '')), "add_vacation", f"Employee ID: {employee_id}")
         return dbc.Alert("Отпуск успешно добавлен.", color="success"), {'timestamp': datetime.now().timestamp()}
     else:
         return dbc.Alert("Ошибка добавления отпуска. Проверьте остаток дней.", color="danger"), dash.no_update
@@ -317,12 +399,19 @@ def handle_delete_employee(n_clicks, selected_row_ids):
     
     try:
         employee_id_to_delete = int(employee_id_to_delete_str)
+        if employee_id_to_delete <= 0:
+            raise ValueError("Invalid employee ID")
     except ValueError:
         return dbc.Alert(f"Некорректный ID сотрудника: {employee_id_to_delete_str}.", color="danger"), dash.no_update
 
-    success, message = db_operations.delete_employee(employee_id_to_delete)
+    try:
+        success, message = db_operations.delete_employee(employee_id_to_delete)
+    except Exception as e:
+        log_error(logger, e, f"Error deleting employee ID: {employee_id_to_delete}")
+        return dbc.Alert("Помилка системи при видаленні співробітника.", color="danger"), dash.no_update
 
     if success:
+        log_user_action(logger, hash_sensitive_data(session.get('user_ipn', '')), "delete_employee", f"Employee ID: {employee_id_to_delete}")
         alert_message = dbc.Alert(message, color="success", duration=4000)
         # Trigger data refresh for tables
         return alert_message, {'timestamp': datetime.now().timestamp()} 
@@ -668,22 +757,41 @@ def parse_contents(contents, filename):
 def handle_employee_import(contents, filename):
     """Обрабатывает загрузку файла и инициирует импорт."""
     if contents is not None:
+        # Валідація файлу
+        from utils.security import validate_file_upload
+        if not validate_file_upload(filename):
+            return html.Div("Непідтримуваний тип файлу. Використовуйте CSV або Excel.", style={'color': 'red'}), no_update
+        
         employees_data, error_message = parse_contents(contents, filename)
         
         if error_message:
+            log_error(logger, error_message, "File parsing error")
             return html.Div(error_message, style={'color': 'red'}), no_update
 
-        imported_count, updated_count, errors = db_operations.batch_import_employees(employees_data)
+        try:
+            imported_count, updated_count, errors = db_operations.batch_import_employees(employees_data)
+        except Exception as e:
+            log_error(logger, e, "Batch import error")
+            return html.Div("Помилка системи при імпорті даних.", style={'color': 'red'}), no_update
 
         success_msg = f"Импорт завершен. Добавлено: {imported_count}. Обновлено: {updated_count}."
         error_msgs = [html.P(f"Ошибка: {e}", style={'color': 'red'}) for e in errors]
         report = [html.P(success_msg)] + error_msgs
         
-        refreshed_data = db_operations.get_all_employees()
+        log_user_action(logger, hash_sensitive_data(session.get('user_ipn', '')), "batch_import", f"Imported: {imported_count}, Updated: {updated_count}")
+        
+        try:
+            refreshed_data = db_operations.get_all_employees()
+        except Exception as e:
+            log_error(logger, e, "Error refreshing employee data after import")
+            refreshed_data = []
+        
         return html.Div(report), refreshed_data
         
     return no_update, no_update
 
-#if __name__ == '__main__':
-#    app.run(debug=False)
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8050))
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    app.run_server(host='0.0.0.0', port=port, debug=debug)
 
