@@ -15,7 +15,7 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8050/', timeout=5)"]
+      test: ["CMD", "curl", "-f", "http://localhost:8050/"]
       interval: 30s
       timeout: 10s
       retries: 3
