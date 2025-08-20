@@ -31,4 +31,4 @@ USER app
 EXPOSE 8050
 
 # Команда запуску
-CMD ["gunicorn", "--bind", "0.0.0.0:8050", "--workers", "4", "--timeout", "120", "app:server"]
+CMD ["python", "app.py"]
