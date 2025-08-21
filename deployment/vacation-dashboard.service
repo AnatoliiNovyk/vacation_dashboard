@@ -1,0 +1,26 @@
+[Unit]
+Description=Vacation Dashboard Web Application
+After=network.target
+
+[Service]
+Type=exec
+User=vacation-dashboard
+Group=vacation-dashboard
+WorkingDirectory=/opt/vacation-dashboard
+Environment=PATH=/opt/vacation-dashboard/venv/bin
+Environment=FLASK_ENV=production
+EnvironmentFile=/etc/vacation-dashboard/.env
+ExecStart=/opt/vacation-dashboard/venv/bin/gunicorn --bind 127.0.0.1:8050 --workers 4 --timeout 120 --access-logfile /var/log/vacation-dashboard/access.log --error-logfile /var/log/vacation-dashboard/error.log app:server
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=10
+
+# Безпека
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vacation-dashboard /var/log/vacation-dashboard /var/run/vacation-dashboard
+
+[Install]
+WantedBy=multi-user.target
