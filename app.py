@@ -6,19 +6,18 @@ from dash import no_update
 from dash import Dash, dcc, html, Input, Output, State
 from flask import Flask, session, redirect, request
 import dash
-from dash.exceptions import PreventUpdate
 from auth.auth_middleware import role_check_middleware
 from components import employee_dashboard, manager_dashboard, hr_dashboard
-from data import db_operations # Import db_operations
+from data import db_operations  # Import db_operations
 from utils import date_utils
 import dash_bootstrap_components as dbc
-import os # For secret key generation
+import os  # For secret key generation
 from datetime import datetime
 from config import config
 from utils.logger import setup_logger, log_user_action, log_error
 from utils.security import (
-    validate_ipn, sanitize_input, validate_date_format, 
-    generate_csrf_token, rate_limit_check, hash_sensitive_data
+    validate_ipn, sanitize_input, validate_date_format,
+    generate_csrf_token, rate_limit_check, hash_sensitive_data,
 )
 import logging
 
@@ -28,23 +27,22 @@ server = Flask(__name__)
 config_name = os.environ.get('FLASK_ENV', 'development')
 server.config.from_object(config[config_name])
 
+# Ensure SECRET_KEY is set in production
+if config_name == 'production' and not server.config.get('SECRET_KEY'):
+    raise RuntimeError('SECRET_KEY must be set in production environment')
+
 # Налаштування логування
 logger = setup_logger(server)
 
 def initialize_database():
     """Ініціалізація бази даних при запуску"""
     try:
-        logger.info(f"Initializing database at: {DATABASE_PATH}")
-        
-        # Ensure database directory exists with proper permissions
-        db_dir = os.path.dirname(DATABASE_PATH)
-        if not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
-            logger.info(f"Created database directory: {db_dir}")
-        
-        conn = get_db_connection()
-        
-        # Створення таблиць якщо вони не існують
+        logger.info(f"Initializing database at: {db_operations.DB_PATH}")
+        conn = db_operations.get_db_connection()
+        conn.close()
+        logger.info("Database connection OK")
+    except Exception as e:
+        log_error(logger, e, "Database initialization failed")
 
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
@@ -733,23 +731,36 @@ def update_employee_vacation_history(pathname):
 
 def parse_contents(contents, filename):
     """Разбирает содержимое загруженного файла (CSV или Excel)."""
+    if not filename:
+        return None, "Имя файла отсутствует."
+
+    lower_name = filename.lower()
+    allowed_ext = (lower_name.endswith('.csv') or lower_name.endswith('.xlsx') or lower_name.endswith('.xls'))
+    if not allowed_ext:
+        return None, "Неподдерживаемый формат файла. Используйте CSV или Excel."
+
     content_type, content_string = contents.split(',')
-    decoded = base64.b64decode(content_string)
     try:
-        if 'csv' in filename:
+        decoded = base64.b64decode(content_string)
+    except Exception:
+        return None, "Некорректная кодировка файла."
+
+    # 5 MB limit to prevent memory issues
+    if len(decoded) > 5 * 1024 * 1024:
+        return None, "Файл слишком большой. Максимум 5 МБ."
+
+    try:
+        if lower_name.endswith('.csv'):
             df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-        elif 'xls' in filename or 'xlsx' in filename:
-            df = pd.read_excel(io.BytesIO(decoded))
         else:
-            return None, "Неподдерживаемый формат файла. Используйте CSV или Excel."
-        
-        # Переименовываем столбцы для унификации
+            df = pd.read_excel(io.BytesIO(decoded))
+
         column_mapping = {
             'ПІБ': 'fio',
             'ІПН': 'ipn',
             'Роль': 'role',
             'Днів відпустки на рік': 'vacation_days_per_year',
-            'Керівник': 'manager_fio'
+            'Керівник': 'manager_fio',
         }
         df.rename(columns=column_mapping, inplace=True)
 
