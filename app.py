@@ -791,7 +791,17 @@ def handle_employee_import(contents, filename):
     return no_update, no_update
 
 if __name__ == '__main__':
+    # Створення необхідних директорій
+    import os
+    os.makedirs('logs', exist_ok=True)
+    os.makedirs('data', exist_ok=True)
+    
     port = int(os.environ.get('PORT', 8050))
-    debug = os.environ.get('FLASK_ENV') == 'development'
-    app.run_server(host='0.0.0.0', port=port, debug=debug)
+    debug = os.environ.get('FLASK_ENV', 'production') == 'development'
+    
+    try:
+        app.run_server(host='0.0.0.0', port=port, debug=debug)
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        raise
 
