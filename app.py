@@ -1,3 +1,5 @@
+import agentops
+
 import base64
 import io
 import pandas as pd
@@ -31,9 +33,13 @@ server.config.from_object(config[config_name])
 # Налаштування логування
 logger = setup_logger(server)
 
+# Initialize AgentOps for monitoring
+agentops.init(tags=["vacation_dashboard", "hr_system"], trace_name="Vacation Dashboard Workflow")
+
 def initialize_database():
     """Ініціалізація бази даних при запуску"""
     try:
+        from data.db_operations import get_db_connection, DATABASE_PATH, _ensure_tables_exist
         logger.info(f"Initializing database at: {DATABASE_PATH}")
         
         # Ensure database directory exists with proper permissions
@@ -45,6 +51,12 @@ def initialize_database():
         conn = get_db_connection()
         
         # Створення таблиць якщо вони не існують
+        _ensure_tables_exist(conn)
+        conn.close()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
 
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
