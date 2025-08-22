@@ -10,6 +10,7 @@ from dash.exceptions import PreventUpdate
 from auth.auth_middleware import role_check_middleware
 from components import employee_dashboard, manager_dashboard, hr_dashboard
 from data import db_operations # Import db_operations
+from data.db_operations import DATABASE_PATH, get_db_connection  # Import DATABASE_PATH and get_db_connection
 from utils import date_utils
 import dash_bootstrap_components as dbc
 import os # For secret key generation
@@ -45,6 +46,15 @@ def initialize_database():
         conn = get_db_connection()
         
         # Створення таблиць якщо вони не існують
+        db_operations._ensure_tables_exist(conn)
+        conn.commit()
+        conn.close()
+        
+        logger.info("Database initialization completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
 
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
@@ -810,6 +820,9 @@ if __name__ == '__main__':
     import os
     os.makedirs('logs', exist_ok=True)
     os.makedirs('data', exist_ok=True)
+    
+    # Initialize database
+    initialize_database()
     
     port = int(os.environ.get('PORT', 8050))
     debug = os.environ.get('FLASK_ENV', 'production') == 'development'
