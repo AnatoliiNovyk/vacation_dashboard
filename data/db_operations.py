@@ -6,17 +6,21 @@ from utils.security import sanitize_input, validate_ipn, validate_date_format
 from pathlib import Path
 import logging
 
-DB_PATH = 'data/vacations.db' # Шлях до файлу бази даних
+# Use single constant for the database file location
+DB_PATH = DATABASE_PATH  # Centralize DB path reference
 # Ensure database directory exists
 DB_DIR = Path('/var/lib/vacation-dashboard')
 DB_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_PATH = str(DB_DIR / 'vacation_dashboard.db')
 
-        # Ensure the database file can be created/accessed
-        db_path = Path(DATABASE_PATH)
-        if not db_path.parent.exists():
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            
+# Ensure the database file can be created/accessed (run once at import time)
+db_path = Path(DATABASE_PATH)
+if not db_path.parent.exists():
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+# Set up a module-level logger
+logger = logging.getLogger(__name__)
+
 def get_db_connection():
     """Встановлює з'єднання з базою даних SQLite."""
     try:
@@ -36,8 +40,9 @@ def get_db_connection():
         except Exception as create_error:
             logger.error(f"Failed to create database: {create_error}")
         raise
-    conn.row_factory = sqlite3.Row # Дозволяє звертатися до колонок за іменем
-        logger.error(f"Unexpected database error: {e}, Path: {DATABASE_PATH}")
+    conn.row_factory = sqlite3.Row  # Дозволяє звертатися до колонок за іменем
+
+    return conn
 
 def _ensure_tables_exist(conn_param=None):
     """Створює таблиці, якщо вони не існують. Це базовий варіант."""
