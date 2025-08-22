@@ -9,7 +9,9 @@ import dash
 from dash.exceptions import PreventUpdate
 from auth.auth_middleware import role_check_middleware
 from components import employee_dashboard, manager_dashboard, hr_dashboard
-from data import db_operations # Import db_operations
+from data import db_operations  # Import db_operations
+# Explicitly import items used elsewhere
+from data.db_operations import DATABASE_PATH, get_db_connection
 from utils import date_utils
 import dash_bootstrap_components as dbc
 import os # For secret key generation
@@ -736,9 +738,10 @@ def parse_contents(contents, filename):
     content_type, content_string = contents.split(',')
     decoded = base64.b64decode(content_string)
     try:
-        if 'csv' in filename:
+        filename_lower = filename.lower()
+        if filename_lower.endswith('.csv'):
             df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-        elif 'xls' in filename or 'xlsx' in filename:
+        elif filename_lower.endswith('.xls') or filename_lower.endswith('.xlsx'):
             df = pd.read_excel(io.BytesIO(decoded))
         else:
             return None, "Неподдерживаемый формат файла. Используйте CSV или Excel."
