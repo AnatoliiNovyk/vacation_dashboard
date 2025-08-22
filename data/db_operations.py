@@ -6,38 +6,29 @@ from utils.security import sanitize_input, validate_ipn, validate_date_format
 from pathlib import Path
 import logging
 
-DB_PATH = 'data/vacations.db' # Шлях до файлу бази даних
-# Ensure database directory exists
-DB_DIR = Path('/var/lib/vacation-dashboard')
-DB_DIR.mkdir(parents=True, exist_ok=True)
-DATABASE_PATH = str(DB_DIR / 'vacation_dashboard.db')
+logger = logging.getLogger(__name__)
 
-        # Ensure the database file can be created/accessed
-        db_path = Path(DATABASE_PATH)
-        if not db_path.parent.exists():
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            
+DATA_DIR = Path('data')
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = str(DATA_DIR / 'vacations.db')
 def get_db_connection():
     """Встановлює з'єднання з базою даних SQLite."""
     try:
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA foreign_keys = ON")  # Увімкнення foreign keys
-        
+        conn.execute("PRAGMA foreign_keys = ON")
         # Test the connection
         conn.execute("SELECT 1").fetchone()
-        conn.execute("PRAGMA journal_mode = WAL")  # Покращення продуктивності
+        conn.execute("PRAGMA journal_mode = WAL")
     except sqlite3.Error as e:
-        logger.error(f"Database connection error: {e}, Path: {DATABASE_PATH}")
-        # Try to create database file if it doesn't exist
+        logger.error(f"Database connection error: {e}, Path: {DB_PATH}")
         try:
-            db_path.touch(exist_ok=True)
-            conn = sqlite3.connect(DATABASE_PATH, timeout=30.0)
-            return conn
+            Path(DB_PATH).touch(exist_ok=True)
+            conn = sqlite3.connect(DB_PATH, timeout=30.0)
         except Exception as create_error:
             logger.error(f"Failed to create database: {create_error}")
-        raise
-    conn.row_factory = sqlite3.Row # Дозволяє звертатися до колонок за іменем
-        logger.error(f"Unexpected database error: {e}, Path: {DATABASE_PATH}")
+            raise
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def _ensure_tables_exist(conn_param=None):
     """Створює таблиці, якщо вони не існують. Це базовий варіант."""

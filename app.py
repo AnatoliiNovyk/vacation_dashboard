@@ -6,7 +6,6 @@ from dash import no_update
 from dash import Dash, dcc, html, Input, Output, State
 from flask import Flask, session, redirect, request
 import dash
-from dash.exceptions import PreventUpdate
 from auth.auth_middleware import role_check_middleware
 from components import employee_dashboard, manager_dashboard, hr_dashboard
 from data import db_operations # Import db_operations
@@ -34,17 +33,12 @@ logger = setup_logger(server)
 def initialize_database():
     """Ініціалізація бази даних при запуску"""
     try:
-        logger.info(f"Initializing database at: {DATABASE_PATH}")
-        
-        # Ensure database directory exists with proper permissions
-        db_dir = os.path.dirname(DATABASE_PATH)
-        if not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
-            logger.info(f"Created database directory: {db_dir}")
-        
-        conn = get_db_connection()
-        
-        # Створення таблиць якщо вони не існують
+        logger.info("Initializing database")
+        # Ensure tables exist by calling into db_operations
+        db_operations._init_db()
+        logger.info("Database initialized")
+    except Exception as e:
+        log_error(logger, e, "Database initialization failed")
 
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
