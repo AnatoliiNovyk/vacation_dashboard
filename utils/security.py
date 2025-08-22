@@ -94,31 +94,52 @@ def validate_file_upload(filename):
     return file_extension in allowed_extensions
 
 def rate_limit_check(user_id, action, max_attempts=5, window_minutes=15):
-    """Базова перевірка обмеження швидкості (потребує Redis для продакшн)"""
-    # Для продакшн рекомендується використовувати Redis
-    # Тут базова реалізація в пам'яті (не підходить для кластера)
-    import time
+    """Базова перевірка обмеження швидкості з покращеним управлінням пам'яттю
     
+    Note: Для продакшн середовищ з кількома воркерами або контейнерами 
+    рекомендується використовувати Redis замість in-memory зберігання.
+    """
+    import time
+    import threading
+    
+    # Thread-safe storage with cleanup
     if not hasattr(rate_limit_check, 'attempts'):
         rate_limit_check.attempts = {}
+        rate_limit_check.lock = threading.Lock()
+        rate_limit_check.last_cleanup = time.time()
     
-    key = f"{user_id}:{action}"
     current_time = time.time()
     window_start = current_time - (window_minutes * 60)
+    key = f"{user_id}:{action}"
     
-    # Очищення старих записів
-    if key in rate_limit_check.attempts:
+    with rate_limit_check.lock:
+        # Periodic cleanup of old entries (every 5 minutes)
+        if current_time - rate_limit_check.last_cleanup > 300:  # 5 minutes
+            rate_limit_check.attempts = {
+                k: v for k, v in rate_limit_check.attempts.items()
+                if any(timestamp > window_start for timestamp in v)
+            }
+            rate_limit_check.last_cleanup = current_time
+        
+        # Get or initialize attempts for this key
+        if key not in rate_limit_check.attempts:
+            rate_limit_check.attempts[key] = []
+        
+        # Remove old attempts outside the window
         rate_limit_check.attempts[key] = [
             timestamp for timestamp in rate_limit_check.attempts[key]
             if timestamp > window_start
         ]
-    else:
-        rate_limit_check.attempts[key] = []
-    
-    # Перевірка ліміту
-    if len(rate_limit_check.attempts[key]) >= max_attempts:
-        return False
-    
-    # Додавання поточної спроби
-    rate_limit_check.attempts[key].append(current_time)
-    return True
+        
+        # Check if limit exceeded
+        if len(rate_limit_check.attempts[key]) >= max_attempts:
+            return False
+        
+        # Add current attempt
+        rate_limit_check.attempts[key].append(current_time)
+        
+        # Prevent memory leaks by limiting stored attempts
+        if len(rate_limit_check.attempts[key]) > max_attempts * 2:
+            rate_limit_check.attempts[key] = rate_limit_check.attempts[key][-max_attempts:]
+        
+        return True

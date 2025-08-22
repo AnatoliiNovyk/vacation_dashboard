@@ -49,6 +49,20 @@ def initialize_database():
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
 
+# Security headers middleware
+def security_headers_middleware(app):
+    def middleware(environ, start_response):
+        def custom_start_response(status, headers, exc_info=None):
+            # Add security headers from config
+            security_headers = getattr(app.config, 'SECURITY_HEADERS', {})
+            for header_name, header_value in security_headers.items():
+                headers.append((header_name, header_value))
+            return start_response(status, headers, exc_info)
+        return app(environ, custom_start_response)
+    return middleware
+
+server.wsgi_app = security_headers_middleware(server)(server.wsgi_app)
+
 # Обробка помилок
 @server.errorhandler(404)
 def not_found_error(error):
