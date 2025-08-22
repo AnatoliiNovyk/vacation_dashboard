@@ -7,3 +7,4 @@ gunicorn
 bleach
 python-dotenv
 Werkzeug
+agentops
