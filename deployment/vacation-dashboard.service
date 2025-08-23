@@ -13,7 +13,7 @@ Environment=PYTHONPATH=/opt/vacation-dashboard
 EnvironmentFile=-/etc/vacation-dashboard/.env
 ExecStartPre=/bin/mkdir -p /var/run/vacation-dashboard
 ExecStartPre=/bin/chown vacation-dashboard:vacation-dashboard /var/run/vacation-dashboard
-ExecStart=/opt/vacation-dashboard/venv/bin/python app.py
+ExecStart=/opt/vacation-dashboard/venv/bin/python -u app.py
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=10
