@@ -57,7 +57,7 @@ def generate_csrf_token():
 def validate_csrf_token(token):
     """Валідація CSRF токену"""
     expected_token = session.get('csrf_token')
-    return bool(expected_token) and bool(token) and secrets.compare_digest(expected_token, token)
+    return expected_token and secrets.compare_digest(expected_token, token)
 
 def require_auth(f):
     """Декоратор для перевірки автентифікації"""

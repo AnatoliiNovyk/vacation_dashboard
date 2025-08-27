@@ -6,6 +6,7 @@ from dash import no_update
 from dash import Dash, dcc, html, Input, Output, State
 from flask import Flask, session, redirect, request
 import dash
+from dash.exceptions import PreventUpdate
 from auth.auth_middleware import role_check_middleware
 from components import employee_dashboard, manager_dashboard, hr_dashboard
 from data import db_operations # Import db_operations
@@ -14,35 +15,24 @@ import dash_bootstrap_components as dbc
 import os # For secret key generation
 from datetime import datetime
 from config import config
+from utils.logger import setup_logger, log_user_action, log_error
+from utils.security import (
+    validate_ipn, sanitize_input, validate_date_format, 
+    generate_csrf_token, rate_limit_check, hash_sensitive_data
+)
 import logging
 
 server = Flask(__name__)
 
 # Завантаження конфігурації
 config_name = os.environ.get('FLASK_ENV', 'development')
-try:
-    server.config.from_object(config[config_name])
-except KeyError:
-    server.config.from_object(config['default'])
+server.config.from_object(config[config_name])
 
-# Базове налаштування логування
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-def initialize_database():
-    """Ініціалізація бази даних при запуску"""
-    try:
-        logger.info("Initializing database")
-        db_operations._init_db()
-        logger.info("Database initialized")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-
-# Ініціалізація бази даних при запуску
-initialize_database()
+# Налаштування логування
+logger = setup_logger(server)
 
 app = Dash(__name__, server=server, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
-server.wsgi_app = role_check_middleware(server.wsgi_app)
+server.wsgi_app = role_check_middleware(server.wsgi_app) # Middleware can remain, it's a pass-through
 
 # Обробка помилок
 @server.errorhandler(404)
@@ -59,14 +49,6 @@ def internal_error(error):
 def forbidden_error(error):
     logger.warning(f"403 error: Access denied for {session.get('user_ipn', 'anonymous')}")
     return "Доступ заборонено", 403
-
-def validate_ipn(ipn):
-    """Базова валідація ІПН"""
-    return ipn and len(ipn) == 10 and ipn.isdigit()
-
-def sanitize_input(text):
-    """Базове очищення вхідних даних"""
-    return text.strip() if text else ""
 
 # Login page layout function
 def login_page_layout():
@@ -130,34 +112,41 @@ def process_login(n_clicks_login_btn, n_submit_ipn_field, ipn):
     if not ipn:
         return dash.no_update, dbc.Alert("Будь ласка, введіть ІПН.", color="warning")
     
+    # Очищення та валідація ІПН
     ipn = sanitize_input(ipn)
     if not validate_ipn(ipn):
-        logger.warning(f"Invalid login attempt with IPN format")
+        log_user_action(logger, hash_sensitive_data(ipn), "invalid_login_attempt", "Invalid IPN format")
         return dash.no_update, dbc.Alert("Некоректний формат ІПН.", color="danger")
     
+    # Перевірка обмеження швидкості
+    if not rate_limit_check(hash_sensitive_data(ipn), "login_attempt"):
+        log_user_action(logger, hash_sensitive_data(ipn), "rate_limit_exceeded", "Too many login attempts")
+        return dash.no_update, dbc.Alert("Забагато спроб входу. Спробуйте пізніше.", color="danger")
+
     try:
         employee = db_operations.get_employee_by_ipn(ipn)
     except Exception as e:
-        logger.error(f"Database error during login: {e}")
+        log_error(logger, e, "Database error during login")
         return dash.no_update, dbc.Alert("Помилка системи. Спробуйте пізніше.", color="danger")
 
-    if employee:
+    if employee: # User found, IPN is effectively the password
         session['user_ipn'] = employee['ipn']
         session['user_role'] = employee['role']
-        session['user_fio'] = employee.get('fio', employee['ipn'])
+        session['user_fio'] = employee.get('fio', employee['ipn']) # Store FIO if available
+        session['csrf_token'] = generate_csrf_token()
         session.permanent = True
         
-        logger.info(f"Successful login for role: {employee['role']}")
+        log_user_action(logger, hash_sensitive_data(employee['ipn']), "successful_login", f"Role: {employee['role']}")
 
         redirect_path = ROLE_PATHS.get(employee['role'])
         if redirect_path:
             return redirect_path, dbc.Alert(f"Успішний вхід. Перенаправлення...", color="success", duration=2000)
         else:
-            session.clear()
-            logger.error(f"Unknown role during login: {employee['role']}")
+            session.clear() 
+            log_error(logger, "Unknown role during login", f"Role: {employee['role']}")
             return dash.no_update, dbc.Alert("Помилка: Роль користувача не налаштована для перенаправлення.", color="danger")
-    else:
-        logger.warning("Failed login attempt - employee not found")
+    else: # User not found or IPN incorrect
+        log_user_action(logger, hash_sensitive_data(ipn), "failed_login_attempt", "Employee not found")
         return dash.no_update, dbc.Alert("Помилка: Співробітника з таким ІПН не знайдено.", color="danger")
 
 
@@ -802,16 +791,7 @@ def handle_employee_import(contents, filename):
     return no_update, no_update
 
 if __name__ == '__main__':
-    # Створення необхідних директорій
-    import os
-    os.makedirs('logs', exist_ok=True)
-    os.makedirs('data', exist_ok=True)
-    
     port = int(os.environ.get('PORT', 8050))
-    debug = os.environ.get('FLASK_ENV', 'production') == 'development'
-    
-    try:
-        app.run_server(host='0.0.0.0', port=port, debug=debug)
-    except Exception as e:
-        logger.error(f"Failed to start server: {e}")
-        raise
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    app.run_server(host='0.0.0.0', port=port, debug=debug)
+

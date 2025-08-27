@@ -1,32 +1,23 @@
 import sqlite3
 from datetime import datetime, date
 from utils import date_utils # Ensure date_utils is imported
-from pathlib import Path
+from utils.logger import log_error, log_user_action
+from utils.security import sanitize_input, validate_ipn, validate_date_format
 import logging
 
+DB_PATH = 'data/vacations.db' # Шлях до файлу бази даних
 logger = logging.getLogger(__name__)
-
-DATA_DIR = Path('data')
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = str(DATA_DIR / 'vacations.db')
 
 def get_db_connection():
     """Встановлює з'єднання з базою даних SQLite."""
     try:
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA foreign_keys = ON")
-        # Test the connection
-        conn.execute("SELECT 1").fetchone()
-        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA foreign_keys = ON")  # Увімкнення foreign keys
+        conn.execute("PRAGMA journal_mode = WAL")  # Покращення продуктивності
     except sqlite3.Error as e:
-        logger.error(f"Database connection error: {e}, Path: {DB_PATH}")
-        try:
-            Path(DB_PATH).touch(exist_ok=True)
-            conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        except Exception as create_error:
-            logger.error(f"Failed to create database: {create_error}")
-            raise
-    conn.row_factory = sqlite3.Row
+        logger.error(f"Database connection error: {e}")
+        raise
+    conn.row_factory = sqlite3.Row # Дозволяє звертатися до колонок за іменем
     return conn
 
 def _ensure_tables_exist(conn_param=None):
@@ -70,53 +61,48 @@ def _init_db():
     """Ініціалізує базу даних, переконуючись, що таблиці існують."""
     _ensure_tables_exist()
 
-# Викликаємо ініціалізацію БД при завантаженні модуля
-try:
-    _init_db()
-except Exception as e:
-    logger.error(f"Failed to initialize database: {e}")
+_init_db() # Викликаємо ініціалізацію БД при завантаженні модуля
 
 def get_all_employees():
     """Отримує всіх співробітників з бази даних."""
-    try:
-        _ensure_tables_exist()
-        conn = get_db_connection()
-        employees = conn.execute('SELECT id, fio, ipn, role, manager_fio, vacation_days_per_year, remaining_vacation_days FROM staff').fetchall()
-        conn.close()
-        return [dict(row) for row in employees]
-    except Exception as e:
-        logger.error(f"Error getting all employees: {e}")
-        return []
+    # Ensure tables exist (basic check, ideally use migrations or init script)
+    _ensure_tables_exist()
+    conn = get_db_connection()
+    # Select specific columns to be sure, including id
+    employees = conn.execute('SELECT id, fio, ipn, role, manager_fio, vacation_days_per_year, remaining_vacation_days FROM staff').fetchall()
+    conn.close()
+    return [dict(row) for row in employees] # Конвертуємо в список словників
 
 def get_employee_by_id(employee_id):
     """Отримує дані співробітника за ID."""
-    try:
-        conn = get_db_connection()
-        employee = conn.execute('SELECT * FROM staff WHERE id = ?', (employee_id,)).fetchone()
-        conn.close()
-        return dict(employee) if employee else None
-    except Exception as e:
-        logger.error(f"Error getting employee by ID {employee_id}: {e}")
-        return None
+    conn = get_db_connection()
+    employee = conn.execute('SELECT * FROM staff WHERE id = ?', (employee_id,)).fetchone()
+    conn.close()
+    return dict(employee) if employee else None
 
 def add_employee(fio, ipn, manager_fio, role, vacation_days_per_year, remaining_vacation_days=None):
     """Додає нового співробітника в базу даних."""
-    # Базова валідація
-    if not fio or not role:
-        logger.warning("Missing required fields for employee creation")
+    # Валідація та очищення вхідних даних
+    fio = sanitize_input(fio)
+    ipn = sanitize_input(ipn)
+    manager_fio = sanitize_input(manager_fio) if manager_fio else None
+    role = sanitize_input(role)
+    
+    if not validate_ipn(ipn):
+        logger.warning(f"Invalid IPN format attempted: {ipn[:3]}***")
         return None
     
-    if not ipn or len(ipn) != 10 or not ipn.isdigit():
-        logger.warning("Invalid IPN format")
+    if not fio or not role:
+        logger.warning("Missing required fields for employee creation")
         return None
     
     if remaining_vacation_days is None:
         remaining_vacation_days = vacation_days_per_year
     
+    conn = get_db_connection()
+    _ensure_tables_exist(conn) # Ensure tables exist before insert
+    cursor = conn.cursor()
     try:
-        conn = get_db_connection()
-        _ensure_tables_exist(conn)
-        cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO staff (fio, ipn, manager_fio, role, vacation_days_per_year, remaining_vacation_days)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -124,7 +110,6 @@ def add_employee(fio, ipn, manager_fio, role, vacation_days_per_year, remaining_
         conn.commit()
         employee_id = cursor.lastrowid
         logger.info(f"Employee added successfully: ID {employee_id}")
-        return employee_id
     except sqlite3.IntegrityError as e:
         conn.rollback()
         logger.error(f"Employee creation failed - integrity error: {e}")
@@ -135,44 +120,45 @@ def add_employee(fio, ipn, manager_fio, role, vacation_days_per_year, remaining_
         return None
     finally:
         conn.close()
+    return employee_id
 
 def get_employee_by_ipn(ipn):
     """Отримує дані співробітника за ІПН, включаючи ПІБ та роль."""
-    try:
-        conn = get_db_connection()
-        employee = conn.execute('SELECT id, ipn, role, fio, remaining_vacation_days FROM staff WHERE ipn = ?', (ipn,)).fetchone()
-        conn.close()
-        return dict(employee) if employee else None
-    except Exception as e:
-        logger.error(f"Error getting employee by IPN: {e}")
-        return None
+    conn = get_db_connection()
+    # Припускаємо, що таблиця 'staff' має колонки 'ipn', 'role', 'fio'
+    employee = conn.execute('SELECT id, ipn, role, fio, remaining_vacation_days FROM staff WHERE ipn = ?', (ipn,)).fetchone()
+    conn.close()
+    if employee:
+        return dict(employee) # Конвертуємо sqlite3.Row в словник
+    return None
 
 def get_managers():
     """Отримує список співробітників з роллю 'Manager'."""
-    try:
-        conn = get_db_connection()
-        managers_cursor = conn.execute("SELECT fio FROM staff WHERE role = 'Manager' ORDER BY fio").fetchall()
-        conn.close()
-        return [{'label': row['fio'], 'value': row['fio']} for row in managers_cursor]
-    except Exception as e:
-        logger.error(f"Error getting managers: {e}")
-        return []
+    conn = get_db_connection()
+    managers_cursor = conn.execute("SELECT fio FROM staff WHERE role = 'Manager' ORDER BY fio").fetchall()
+    conn.close()
+    return [{'label': row['fio'], 'value': row['fio']} for row in managers_cursor]
 
 def add_vacation(employee_id, start_date, end_date, total_days):
     """Додає відпустку для співробітника та оновлює залишок днів."""
-    # Базова валідація
+    # Валідація дат
+    if not validate_date_format(start_date) or not validate_date_format(end_date):
+        logger.warning(f"Invalid date format for vacation: {start_date} - {end_date}")
+        return False
+    
     if total_days <= 0:
         logger.warning(f"Invalid vacation days count: {total_days}")
         return False
     
+    conn = get_db_connection()
+    _ensure_tables_exist(conn)
+    cursor = conn.cursor()
     try:
-        conn = get_db_connection()
-        _ensure_tables_exist(conn)
-        cursor = conn.cursor()
         # Перевірка чи достатньо днів відпустки
         employee = conn.execute('SELECT remaining_vacation_days FROM staff WHERE id = ?', (employee_id,)).fetchone()
         if not employee or employee['remaining_vacation_days'] < total_days:
             logger.warning(f"Insufficient vacation days for employee ID {employee_id}")
+            conn.close()
             return False
 
         cursor.execute("""
@@ -200,22 +186,18 @@ def add_vacation(employee_id, start_date, end_date, total_days):
 
 def get_vacation_history(year):
     """Отримує історію відпусток за вказаний рік."""
-    try:
-        conn = get_db_connection()
-        _ensure_tables_exist(conn)
-        query = """
-            SELECT s.fio, s.manager_fio, v.start_date, v.end_date, v.total_days
-            FROM vacations v
-            JOIN staff s ON v.staff_id = s.id
-            WHERE strftime('%Y', v.start_date) = ? OR strftime('%Y', v.end_date) = ?
-            ORDER BY v.start_date DESC
-        """
-        history = conn.execute(query, (str(year), str(year))).fetchall()
-        conn.close()
-        return [dict(row) for row in history]
-    except Exception as e:
-        logger.error(f"Error getting vacation history: {e}")
-        return []
+    conn = get_db_connection()
+    _ensure_tables_exist(conn)
+    query = """
+        SELECT s.fio, s.manager_fio, v.start_date, v.end_date, v.total_days
+        FROM vacations v
+        JOIN staff s ON v.staff_id = s.id
+        WHERE strftime('%Y', v.start_date) = ? OR strftime('%Y', v.end_date) = ?
+        ORDER BY v.start_date DESC
+    """
+    history = conn.execute(query, (str(year), str(year))).fetchall()
+    conn.close()
+    return [dict(row) for row in history]
 
 
 def get_employee_vacation_summary_by_ipn(ipn):
