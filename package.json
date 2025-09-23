@@ -1,0 +1,11 @@
+{
+  "name": "vacation-dashboard",
+  "version": "1.0.0",
+  "description": "Python-based vacation dashboard application",
+  "scripts": {
+    "start": "echo 'This is a Python project. Use: python3 app.py'"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "private": true
+}
