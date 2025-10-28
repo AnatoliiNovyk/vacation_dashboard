@@ -5,7 +5,8 @@
   "scripts": {
     "start": "echo 'This is a Python project. Use: python3 app.py'"
   },
-  "dependencies": {},
-  "devDependencies": {},
+  "dependencies": {
+    "pandas": "^0.0.3"
+  },
   "private": true
 }
