@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime, date
 from utils import date_utils # Ensure date_utils is imported
+from utils.security import validate_ipn, sanitize_input
 from pathlib import Path
 import logging
 
@@ -448,21 +449,12 @@ if __name__ == '__main__':
     for emp in all_staff:
         print(emp)
 
-    print("\nHR Table Employees:")
-    hr_employees = get_employees_for_hr_table()
-    for emp in hr_employees:
-        print(emp)
-
-    print("\nVacation History (2024):") # Assuming current year is 2024 for test
+    print("\nVacation History (current year):")
     history = get_vacation_history(datetime.now().year)
     for item in history:
         print(item)
 
-    # Test new function - replace 'test_ipn' with an actual IPN from your DB
-    # test_ipn = "1234567890" 
-    # print(f"\nVacation summary for IPN {test_ipn}:")
-    # summary = get_employee_vacation_summary_by_ipn(test_ipn)
-    # print(summary)
+    print("\nDatabase operations module loaded successfully.")
 def get_vacation_history_for_employee(employee_id):
     """Отримує історію відпусток для конкретного співробітника."""
     conn = get_db_connection()

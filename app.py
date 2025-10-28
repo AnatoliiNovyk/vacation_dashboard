@@ -10,6 +10,8 @@ from auth.auth_middleware import role_check_middleware
 from components import employee_dashboard, manager_dashboard, hr_dashboard
 from data import db_operations # Import db_operations
 from utils import date_utils
+from utils.security import validate_ipn, sanitize_input, validate_date_format, hash_sensitive_data, validate_file_upload
+from utils.logger import log_user_action, log_error
 import dash_bootstrap_components as dbc
 import os # For secret key generation
 from datetime import datetime
@@ -59,14 +61,6 @@ def internal_error(error):
 def forbidden_error(error):
     logger.warning(f"403 error: Access denied for {session.get('user_ipn', 'anonymous')}")
     return "Доступ заборонено", 403
-
-def validate_ipn(ipn):
-    """Базова валідація ІПН"""
-    return ipn and len(ipn) == 10 and ipn.isdigit()
-
-def sanitize_input(text):
-    """Базове очищення вхідних даних"""
-    return text.strip() if text else ""
 
 # Login page layout function
 def login_page_layout():
@@ -769,7 +763,6 @@ def handle_employee_import(contents, filename):
     """Обрабатывает загрузку файла и инициирует импорт."""
     if contents is not None:
         # Валідація файлу
-        from utils.security import validate_file_upload
         if not validate_file_upload(filename):
             return html.Div("Непідтримуваний тип файлу. Використовуйте CSV або Excel.", style={'color': 'red'}), no_update
         
